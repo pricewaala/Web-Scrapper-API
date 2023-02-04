@@ -27,7 +27,24 @@ def get_title(soup):
 
 
 # Function to extract Product Price
-def get_price(soup):
+def get_price_FlipKart(soup):
+    try:
+        price = soup.find("div", attrs={
+            'class': '30jeq3 _1_WHN1'}).string.strip()
+
+    except AttributeError:
+
+        try:
+            # If there is some deal price
+            price = soup.find("div", attrs={
+                'class': '30jeq3 _1_WHN1'}).string.strip()
+
+        except:
+            price = ""
+
+    return price
+
+def get_price_Amazon(soup):
     try:
         price = soup.find("span", attrs={
             'class': 'a-offscreen'}).string.strip()

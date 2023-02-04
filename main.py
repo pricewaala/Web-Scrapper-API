@@ -4,20 +4,21 @@ import requests
 from bs4 import BeautifulSoup
 from fastapi import FastAPI
 
-from Service.WebScrapperService import get_title, get_price, get_rating, get_review_count, get_availability
+from Service.WebScrapperService import get_title, get_price_Amazon, get_price_FlipKart
 
 app = FastAPI()
 
 
-@app.get("/")
-async def root():
+@app.get("/amazon/{search}")
+async def root_Amazon(search: str):
     # Headers for request
     HEADERS = ({'User-Agent':
                     'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/44.0.2403.157 Safari/537.36',
                 'Accept-Language': 'en-US'})
 
+    nospaces = search.replace(" ", "+")
     # The webpage URL
-    URL = "https://www.amazon.in/s?k=oneplus+11+pro"
+    URL = "https://www.amazon.in/s?k="+nospaces
 
     # HTTP Request
     webpage = requests.get(URL, headers=HEADERS)
@@ -53,12 +54,52 @@ async def root():
         # print("Availability =", get_availability(new_soup))
         # print(link)
         # print()
-        arr.append(get_title(new_soup) + ", " + get_price(new_soup) + " , " + link)
+        arr.append(get_title(new_soup) + ", " + get_price_Amazon(new_soup) + " , " + link)
         end = int(time() * 1000)
-        print(end-start)
+        print(end - start)
 
     print(len(arr))
     return arr
+
+
+@app.get("/flipkart/{search}")
+async def root_Flipkart(search: str):
+    nospaces = search.replace(" ", "+")
+    link = "https://www.flipkart.com/search?q="+nospaces
+    page = requests.get(link)
+    soup = BeautifulSoup(page.content, "lxml")
+    # it gives us the visual representation of data
+    # name = soup.find('div', class_="_4rR01T")
+    # print(name)
+    # rating = soup.find('div', class_="_3LWZlK")
+    # print(rating)
+    # specification = soup.find('div', class_="fMghEO")
+    # print(specification)
+    # price = soup.find('div', class_='_30jeq3 _1_WHN1')
+    # print(price)
+
+    products = []  # List to store the name of the product
+    prices = []  # List to store price of the product
+    ratings = []  # List to store rating of the product
+    apps = []  # List to store supported apps
+    os = []  # List to store operating system
+    hd = []  # List to store resolution
+    sound = []
+
+    for data in soup.findAll('div', class_='_3pLy-c row'):
+        names = data.find('div', attrs={'class': '_4rR01T'})
+        price = data.find('div', attrs={'class': '_30jeq3 _1_WHN1'})
+        # rating = data.find('div', attrs={'class': '_3LWZlK'})
+        # specification = data.find('div', attrs={'class': 'fMghEO'})
+        products.append(names.text)  # Add product name to list
+        prices.append(price.text)  # Add price to list
+        # apps.append(app)  # Add supported apps specifications to list
+        # ratings.append(rating.text)  # Add rating specifications to list
+
+    print(products)
+    # print(len(ratings))
+    print(prices)
+
 
 
 @app.get("/hello/{name}")
