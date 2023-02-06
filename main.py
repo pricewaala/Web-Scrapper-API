@@ -100,7 +100,28 @@ async def root_Flipkart(search: str):
     # print(len(ratings))
     print(prices)
 
+@app.get("/reliance/{search}")
+async def root_Croma(search: str):
+    nospaces = search.replace(" ", "+")
+    # The webpage URL
+    URL = "https://www.reliancedigital.in/search?q=" + nospaces + ":relevance"
 
+    # HTTP Request
+    webpage = requests.get(URL)
+
+    # Soup Object containing all data
+    soup = BeautifulSoup(webpage.content, 'html.parser')
+
+    s = soup.findAll('div', class_='sp grid')
+    a = len(s)
+    for i in range(a):
+        for link in s[i].findAll('a'):
+            ab = link.get('href')
+            print(ab)
+            new_webpage = requests.get("https://www.reliancedigital.in" + ab)
+            new_soup = BeautifulSoup(new_webpage.content, "lxml")
+            s1 = new_soup.find('span', class_='pdp__offerPrice')
+            print(s1.text)
 
 @app.get("/hello/{name}")
 async def say_hello(name: str):
