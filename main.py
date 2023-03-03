@@ -3,11 +3,21 @@ from time import time
 import requests
 from bs4 import BeautifulSoup
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from Service.WebScrapperService import get_title, get_price_Amazon, get_price_FlipKart
 
 app = FastAPI()
 
+origins = ["*"]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 @app.get("/amazon/{search}")
 async def root_Amazon(search: str):
@@ -18,7 +28,7 @@ async def root_Amazon(search: str):
 
     nospaces = search.replace(" ", "+")
     # The webpage URL
-    URL = "https://www.amazon.in/s?k="+nospaces
+    URL = "https://www.amazon.in/s?k=" + nospaces
 
     # HTTP Request
     webpage = requests.get(URL, headers=HEADERS)
@@ -62,10 +72,11 @@ async def root_Amazon(search: str):
     return arr
 
 
+
 @app.get("/flipkart/{search}")
 async def root_Flipkart(search: str):
     nospaces = search.replace(" ", "+")
-    link = "https://www.flipkart.com/search?q="+nospaces
+    link = "https://www.flipkart.com/search?q=" + nospaces
     page = requests.get(link)
     soup = BeautifulSoup(page.content, "lxml")
     # it gives us the visual representation of data
@@ -100,8 +111,61 @@ async def root_Flipkart(search: str):
     # print(len(ratings))
     print(prices)
 
+
+@app.get("/amazon/v2/{search}")
+async def root_AmazonV2(search: str):
+    products = []  # List to store the name of the product
+    prices = []  # List to store price of the product
+    ratings = []  # List to store rating of the product
+    apps = []  # List to store supported apps
+    os = []  # List to store operating system
+    hd = []  # List to store resolution
+    sound = []
+    links_list = []
+
+    while len(links_list) == 0:
+        nospaces = search.replace(" ", "+")
+        link = "https://www.amazon.in/s?k=" + nospaces
+        page = requests.get(link)
+        soup = BeautifulSoup(page.content, "lxml")
+        s = soup.findAll('a', {'class': 'a-link-normal s-no-outline'})
+        # Loop for extracting links from Tag Objects
+        for link in s:
+            links_list.append(link.get('href'))
+
+        print(len(links_list))
+
+    for i1 in links_list:
+        new_webpage = requests.get("https://www.amazon.in" + i1)
+        new_soup = BeautifulSoup(new_webpage.content, "lxml")
+        s1 = new_soup.find('span', class_='a-price-whole')
+        while s1 is None:
+            new_webpage = requests.get("https://www.amazon.in" + i1)
+            new_soup = BeautifulSoup(new_webpage.content, "lxml")
+            s1 = new_soup.find('span', class_='a-price-whole')
+            print(i1, s1)
+        print(s1.text)
+    return links_list
+
+
+# a = len(s)
+# print(a)
+# for i in range(a):
+#     # print(s[i])
+#     ab = s[i].get('href')
+#     print(ab)
+# new_webpage = requests.get("https://www.reliancedigital.in" + ab)
+# new_soup = BeautifulSoup(new_webpage.content, "lxml")
+# s1 = new_soup.find('span', class_='pdp__offerPrice')
+# print(s1.text)
+
+# print(products)
+# print(len(ratings))
+# print(prices)
+
+
 @app.get("/reliance/{search}")
-async def root_Croma(search: str):
+async def root_Reliance(search: str):
     nospaces = search.replace(" ", "+")
     # The webpage URL
     URL = "https://www.reliancedigital.in/search?q=" + nospaces + ":relevance"
@@ -123,6 +187,11 @@ async def root_Croma(search: str):
             s1 = new_soup.find('span', class_='pdp__offerPrice')
             print(s1.text)
 
+
 @app.get("/hello/{name}")
 async def say_hello(name: str):
     return {"message": f"Hello {name}"}
+
+@app.get("/")
+async def read_root():
+    return "Welcome to PriceWalla"
