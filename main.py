@@ -1,11 +1,20 @@
+import asyncio
 from time import time
+from typing import List
 
+import redis as redis
 import requests
 from bs4 import BeautifulSoup
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, Field
 
-from Service.WebScrapperService import get_title, get_price_Amazon, get_price_FlipKart
+from Service.WebScrapperService import get_title, get_price_Amazon
+
+redis_client = redis.Redis(
+    host='redis-12457.c93.us-east-1-3.ec2.cloud.redislabs.com',
+    port=12457,
+    password='LzwBDIEMPTPC3WSf29nOuER5itpalbsJ')
 
 app = FastAPI()
 
@@ -18,6 +27,82 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+class Product(BaseModel):
+    name: str = Field(...)
+    description: str = Field(None)
+    price: float = Field(...)
+    tax: float = Field(None)
+    tags: List[str] = Field([])
+
+
+class ProductList(BaseModel):
+    products: List[Product] = Field(...)
+
+
+
+@app.get("/amazon/v2/{search}", response_model=ProductList)
+async def search_amazon_products(search: str):
+    search_query_cache = search.replace(" ", "")
+
+    # Check if search query is in Redis cache
+    cached_products = redis_client.get("amazon_product_" + search_query_cache)
+    if cached_products is not None:
+        # Return cached data to the client
+        print("In Cache")
+        asyncio.create_task(_update_cache_and_return_products(search_query_cache, search))
+        return {"products": eval(cached_products.decode())}
+
+    # Run the rest of the code in the background
+    products = await _update_cache_and_return_products(search_query_cache, search)
+
+    # Return the product list to the client
+    return {"products": products}
+
+
+async def _update_cache_and_return_products(search_query_cache: str, search: str):
+    links_list = []
+
+    # Collect all product links on Amazon search results page
+    while not links_list:
+        search_query = search.replace(" ", "+")
+        url = f"https://www.amazon.in/s?k={search_query}"
+        page = requests.get(url)
+        soup = BeautifulSoup(page.content, "lxml")
+        links = soup.find_all("a", class_="a-link-normal s-no-outline")
+        links_list = [link.get("href") for link in links]
+        print(len(links_list))
+
+    # Extract product details from each link
+    products = []
+    for link in links_list:
+        url = f"https://www.amazon.in{link}"
+        page = requests.get(url)
+        soup = BeautifulSoup(page.content, "lxml")
+        product_section = soup.find("div", class_="centerColAlign")
+        while not product_section:
+            page = requests.get(url)
+            soup = BeautifulSoup(page.content, "lxml")
+            product_section = soup.find("div", class_="centerColAlign")
+        name = product_section.find("span", class_="a-size-large product-title-word-break").text.strip()
+        price = product_section.find("span", class_="a-price-whole")
+        if price is None:
+            price = 0.0
+        else:
+            price = float(price.text.replace(",", ""))
+        description = ""
+        tax = None
+        tags = []
+        product = Product(name=name, description=description, price=price, tax=tax, tags=tags)
+        products.append(product)
+
+    # Store products in Redis cache
+    redis_client.set("amazon_product_" + search_query_cache, str(products))
+    print("Updated/Added Cache"+search_query_cache)
+    # Return the product list to the client
+    return products
+
 
 @app.get("/amazon/{search}")
 async def root_Amazon(search: str):
@@ -72,7 +157,6 @@ async def root_Amazon(search: str):
     return arr
 
 
-
 @app.get("/flipkart/{search}")
 async def root_Flipkart(search: str):
     nospaces = search.replace(" ", "+")
@@ -112,58 +196,6 @@ async def root_Flipkart(search: str):
     print(prices)
 
 
-@app.get("/amazon/v2/{search}")
-async def root_AmazonV2(search: str):
-    products = []  # List to store the name of the product
-    prices = []  # List to store price of the product
-    ratings = []  # List to store rating of the product
-    apps = []  # List to store supported apps
-    os = []  # List to store operating system
-    hd = []  # List to store resolution
-    sound = []
-    links_list = []
-
-    while len(links_list) == 0:
-        nospaces = search.replace(" ", "+")
-        link = "https://www.amazon.in/s?k=" + nospaces
-        page = requests.get(link)
-        soup = BeautifulSoup(page.content, "lxml")
-        s = soup.findAll('a', {'class': 'a-link-normal s-no-outline'})
-        # Loop for extracting links from Tag Objects
-        for link in s:
-            links_list.append(link.get('href'))
-
-        print(len(links_list))
-
-    for i1 in links_list:
-        new_webpage = requests.get("https://www.amazon.in" + i1)
-        new_soup = BeautifulSoup(new_webpage.content, "lxml")
-        s1 = new_soup.find('span', class_='a-price-whole')
-        while s1 is None:
-            new_webpage = requests.get("https://www.amazon.in" + i1)
-            new_soup = BeautifulSoup(new_webpage.content, "lxml")
-            s1 = new_soup.find('span', class_='a-price-whole')
-            print(i1, s1)
-        print(s1.text)
-    return links_list
-
-
-# a = len(s)
-# print(a)
-# for i in range(a):
-#     # print(s[i])
-#     ab = s[i].get('href')
-#     print(ab)
-# new_webpage = requests.get("https://www.reliancedigital.in" + ab)
-# new_soup = BeautifulSoup(new_webpage.content, "lxml")
-# s1 = new_soup.find('span', class_='pdp__offerPrice')
-# print(s1.text)
-
-# print(products)
-# print(len(ratings))
-# print(prices)
-
-
 @app.get("/reliance/{search}")
 async def root_Reliance(search: str):
     nospaces = search.replace(" ", "+")
@@ -191,6 +223,7 @@ async def root_Reliance(search: str):
 @app.get("/hello/{name}")
 async def say_hello(name: str):
     return {"message": f"Hello {name}"}
+
 
 @app.get("/")
 async def read_root():
