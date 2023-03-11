@@ -4,9 +4,8 @@ from typing import List
 
 import redis as redis
 import requests
-import schedule as schedule
 from bs4 import BeautifulSoup
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
@@ -50,41 +49,48 @@ class ProductList(BaseModel):
 
 @app.get("/amazon/v2/{search}", response_model=ProductList)
 async def search_amazon_products(search: str):
-    search_query_cache = search.replace(" ", "")
-    # Check if search query is in Redis cache
-    cached_products = redis_client.get("amazon_product_" + search_query_cache)
-    if cached_products is not None:
-        # Return cached data to the client
-        print("In Cache")
-        asyncio.create_task(_update_cache_and_return_products(search_query_cache, search, True))
-        return {"status": 200, "products": eval(cached_products.decode()), "served_through_cache": True}
+    try:
+        search_query_cache = search.replace(" ", "")
+        # Check if search query is in Redis cache
+        cached_products = redis_client.get("amazon_product_" + search_query_cache)
+        if cached_products is not None:
+            # Return cached data to the client
+            print("In Cache")
+            asyncio.create_task(_update_cache_and_return_products(search_query_cache, search, True))
+            return {"status": 200, "products": eval(cached_products.decode()), "served_through_cache": True}
 
-    # Run the rest of the code in the background
-    products = await _update_cache_and_return_products(search_query_cache, search, False)
+        # Run the rest of the code in the background
+        products = await _update_cache_and_return_products(search_query_cache, search, False)
 
-    # Return the product list to the client
-    return {"status": 200, "products": products, "served_through_cache": False}
+        # Return the product list to the client
+        return {"status": 200, "products": products, "served_through_cache": False}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 async def _update_cache_and_return_products(search_query_cache: str, search: str, isUpdated: bool):
-    links_list = []
-    scrapper = AmazonOperationalScrapper()
+    try:
+        links_list = []
+        scrapper = AmazonOperationalScrapper()
 
-    products_page_1 = await scrapper.getAmazonContentForPage(links_list, "1", search)
-    products_page_2 = await scrapper.getAmazonContentForPage(links_list, "2", search)
+        products_page_1 = await scrapper.getAmazonContentForPage(links_list, "1", search)
+        products_page_2 = await scrapper.getAmazonContentForPage(links_list, "2", search)
 
-    products = products_page_1 + products_page_2
+        products = products_page_1 + products_page_2
 
-    print(len(products))
-    # Store products in Redis cache
-    redis_client.set("amazon_product_" + search_query_cache, str(products))
-    if isUpdated:
-        print("Updated Cache" + search_query_cache)
-    else:
-        print("Added New Cache" + search_query_cache)
+        print(len(products))
+        # Store products in Redis cache
+        redis_client.set("amazon_product_" + search_query_cache, str(products))
+        if isUpdated:
+            print("Updated Cache" + search_query_cache)
+        else:
+            print("Added New Cache" + search_query_cache)
 
-    # Return the product list to the client
-    return products
+        # Return the product list to the client
+        return products
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.get("/amazon/{search}")
 async def root_Amazon(search: str):
