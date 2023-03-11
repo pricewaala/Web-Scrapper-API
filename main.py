@@ -10,6 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from Model.AmazonOperationalScrapper import AmazonOperationalScrapper
+
 from Service.NotToDelete import get_title, get_price_Amazon
 
 redis_client = redis.Redis(
@@ -182,6 +183,95 @@ async def root_Flipkart(search: str):
     print(products)
     # print(len(ratings))
     print(prices)
+
+
+@app.get("/flipkart/v2/{search}")
+async def root_Flipkart(search: str):
+    global rating_count
+    products = []
+    nospaces = search.replace(" ", "+")
+    link = "https://www.flipkart.com/search?q=" + nospaces
+    page = requests.get(link)
+    soup = BeautifulSoup(page.content, "lxml")
+    links_list = []
+    for data in soup.findAll('div', class_='_2kHMtA'):
+        links = data.findAll('a')
+        for link in links:
+            links_list.append(link.get("href"))
+
+    for links in links_list:
+        link_page = "https://www.flipkart.com" + links
+        page_content = requests.get(link_page)
+        content = BeautifulSoup(page_content.content, "lxml")
+
+        all_contents = content.find('div', attrs={'class': '_1YokD2 _2GoDe3'})
+        if all_contents is not None:
+            name = all_contents.find('span', attrs={'class': 'B_NuCI'})
+            if name is not None:
+                name = name.text
+            else:
+                name = ""
+
+            # Get the description of the product
+            description = []
+            description_div = all_contents.find('div', attrs={'class': '_2418kt'})
+            if description_div is not None:
+                description_tags = description_div.find_all('li')
+                for tag in description_tags:
+                    description.append(tag.text.strip())
+
+            # Get the rating of the product
+            rating_star = ""
+            rating_div = all_contents.find('div', attrs={'class': '_3LWZlK'})
+            if rating_div is not None:
+                if rating_star is not None:
+                    rating_star = rating_div.text
+                else:
+                    rating_star = ""
+
+                rating_count_span = all_contents.find('span', attrs={'class': '_2_R_DZ'})
+                if rating_count_span is not None:
+                    rating_count_all_span = rating_count_span.findAll('span')
+                    if rating_count_all_span is not None:
+                        for rating_val in rating_count_all_span:
+                            if "Ratings" in rating_val.text:
+                                rating_count = rating_val.text
+                else:
+                    rating_count = ""
+
+            # Get the price of the product
+            price_div = all_contents.find('div', attrs={'class': '_30jeq3 _16Jk6d'})
+            if price_div is not None:
+                price = price_div.text.replace('₹', '').replace(',', '').strip()
+                price = float(price)
+            else:
+                price = 0.0
+
+            # Get the exchange offer of the product
+            exchange = ""
+            exchange_div = all_contents.findAll('div', attrs={'class': '_17Rl6L'})
+            if exchange_div is not None:
+                for exchange_val in exchange_div:
+                    # print(exchange_val.text)
+                    if "up" in exchange_val.text:
+                        exchange = exchange_val.text.strip()
+            else:
+                exchange = ""
+
+            # Get the image of the product
+            image = []
+            image_div = content.find('div', attrs={'class': '_2mLllQ'})
+            if image_div is not None:
+                image_tags = image_div.find_all('img')
+                for tag in image_tags:
+                    image.append(tag.get('src'))
+
+            product = Product(name=name, description=description, ratingStar=rating_star, ratingCount=rating_count,
+                              price=price, exchange=exchange, image=image, link=link_page)
+            products.append(product)
+
+    product_list = ProductList(status=200, products=products, served_through_cache=False)
+    return product_list
 
 
 @app.get("/reliance/{search}")
