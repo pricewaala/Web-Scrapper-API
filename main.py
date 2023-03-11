@@ -4,12 +4,14 @@ from typing import List
 
 import redis as redis
 import requests
+import schedule as schedule
 from bs4 import BeautifulSoup
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from Service.WebScrapperService import get_title, get_price_Amazon
+from Model.AmazonOperationalScrapper import AmazonOperationalScrapper
+from Service.NotToDelete import get_title, get_price_Amazon
 
 redis_client = redis.Redis(
     host='redis-12457.c93.us-east-1-3.ec2.cloud.redislabs.com',
@@ -31,78 +33,58 @@ app.add_middleware(
 
 class Product(BaseModel):
     name: str = Field(...)
-    description: str = Field(None)
+    description: List[str] = Field([])
+    ratingStar: str = Field(...)
+    ratingCount: str = Field(...)
     price: float = Field(...)
-    tax: float = Field(None)
-    tags: List[str] = Field([])
+    exchange: str = Field(...)
+    image: List[str] = Field([])
+    link: str = Field(...)
 
 
 class ProductList(BaseModel):
+    status: int = Field(...)
     products: List[Product] = Field(...)
-
+    served_through_cache: bool = Field(...)
 
 
 @app.get("/amazon/v2/{search}", response_model=ProductList)
 async def search_amazon_products(search: str):
     search_query_cache = search.replace(" ", "")
-
     # Check if search query is in Redis cache
     cached_products = redis_client.get("amazon_product_" + search_query_cache)
     if cached_products is not None:
         # Return cached data to the client
         print("In Cache")
-        asyncio.create_task(_update_cache_and_return_products(search_query_cache, search))
-        return {"products": eval(cached_products.decode())}
+        asyncio.create_task(_update_cache_and_return_products(search_query_cache, search, True))
+        return {"status": 200, "products": eval(cached_products.decode()), "served_through_cache": True}
 
     # Run the rest of the code in the background
-    products = await _update_cache_and_return_products(search_query_cache, search)
+    products = await _update_cache_and_return_products(search_query_cache, search, False)
 
     # Return the product list to the client
-    return {"products": products}
+    return {"status": 200, "products": products, "served_through_cache": False}
 
 
-async def _update_cache_and_return_products(search_query_cache: str, search: str):
+async def _update_cache_and_return_products(search_query_cache: str, search: str, isUpdated: bool):
     links_list = []
+    scrapper = AmazonOperationalScrapper()
 
-    # Collect all product links on Amazon search results page
-    while not links_list:
-        search_query = search.replace(" ", "+")
-        url = f"https://www.amazon.in/s?k={search_query}"
-        page = requests.get(url)
-        soup = BeautifulSoup(page.content, "lxml")
-        links = soup.find_all("a", class_="a-link-normal s-no-outline")
-        links_list = [link.get("href") for link in links]
-        print(len(links_list))
+    products_page_1 = await scrapper.getAmazonContentForPage(links_list, "1", search)
+    products_page_2 = await scrapper.getAmazonContentForPage(links_list, "2", search)
 
-    # Extract product details from each link
-    products = []
-    for link in links_list:
-        url = f"https://www.amazon.in{link}"
-        page = requests.get(url)
-        soup = BeautifulSoup(page.content, "lxml")
-        product_section = soup.find("div", class_="centerColAlign")
-        while not product_section:
-            page = requests.get(url)
-            soup = BeautifulSoup(page.content, "lxml")
-            product_section = soup.find("div", class_="centerColAlign")
-        name = product_section.find("span", class_="a-size-large product-title-word-break").text.strip()
-        price = product_section.find("span", class_="a-price-whole")
-        if price is None:
-            price = 0.0
-        else:
-            price = float(price.text.replace(",", ""))
-        description = ""
-        tax = None
-        tags = []
-        product = Product(name=name, description=description, price=price, tax=tax, tags=tags)
-        products.append(product)
+    products = products_page_1 + products_page_2
 
+    print(len(products))
     # Store products in Redis cache
     redis_client.set("amazon_product_" + search_query_cache, str(products))
-    print("Updated/Added Cache"+search_query_cache)
+    if isUpdated:
+        print("Updated Cache" + search_query_cache)
+    else:
+        print("Added New Cache" + search_query_cache)
+
     # Return the product list to the client
     return products
-
 
 @app.get("/amazon/{search}")
 async def root_Amazon(search: str):
