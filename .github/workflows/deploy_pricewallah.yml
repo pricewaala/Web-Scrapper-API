@@ -60,4 +60,4 @@ jobs:
         with:
           app-name: 'pricewallah'
           slot-name: 'Production'
-          publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_BEA76A24A0714C48A076A3AAFFBF6C56 }}
+          publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_7E25437644F44346AA523B7FC11F01CE }}
