@@ -1,11 +1,21 @@
+import asyncio
 from time import time
 
+import redis as redis
 import requests
 from bs4 import BeautifulSoup
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
-from Service.WebScrapperService import get_title, get_price_Amazon, get_price_FlipKart
+from Model.AmazonOperationalScrapper import AmazonOperationalScrapper
+from Model.FlipkartOperationalScrapper import FlipkartOperationalScrapper
+from Model.ProductDetails import ProductList, Product
+from Service.NotToDelete import get_title, get_price_Amazon
+
+redis_client = redis.Redis(
+    host='redis-12457.c93.us-east-1-3.ec2.cloud.redislabs.com',
+    port=12457,
+    password='LzwBDIEMPTPC3WSf29nOuER5itpalbsJ')
 
 app = FastAPI()
 
@@ -18,6 +28,51 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+@app.get("/amazon/v2/{search}", response_model=ProductList)
+async def search_amazon_products(search: str):
+    try:
+        search_query_cache = search.replace(" ", "")
+        # Check if search query is in Redis cache
+        cached_products = redis_client.get("amazon_product_" + search_query_cache)
+        if cached_products is not None:
+            # Return cached data to the client
+            print("In Cache")
+            asyncio.create_task(_update_cache_and_return_products_amazon(search_query_cache, search, True))
+            return {"status": 200, "products": eval(cached_products.decode()), "served_through_cache": True}
+
+        # Run the rest of the code in the background
+        products = await _update_cache_and_return_products_amazon(search_query_cache, search, False)
+
+        # Return the product list to the client
+        return {"status": 200, "products": products, "served_through_cache": False}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+async def _update_cache_and_return_products_amazon(search_query_cache: str, search: str, isUpdated: bool):
+    try:
+        links_list = []
+        scrapper = AmazonOperationalScrapper()
+
+        products_page_1 = await scrapper.getAmazonContentForPage(links_list, "1", search)
+        products_page_2 = await scrapper.getAmazonContentForPage(links_list, "2", search)
+
+        products = products_page_1 + products_page_2
+
+        print(len(products))
+        # Store products in Redis cache
+        redis_client.set("amazon_product_" + search_query_cache, str(products))
+        if isUpdated:
+            print("Updated Cache" + search_query_cache)
+        else:
+            print("Added New Cache" + search_query_cache)
+
+        # Return the product list to the client
+        return products
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.get("/amazon/{search}")
 async def root_Amazon(search: str):
@@ -72,7 +127,6 @@ async def root_Amazon(search: str):
     return arr
 
 
-
 @app.get("/flipkart/{search}")
 async def root_Flipkart(search: str):
     nospaces = search.replace(" ", "+")
@@ -112,56 +166,48 @@ async def root_Flipkart(search: str):
     print(prices)
 
 
-@app.get("/amazon/v2/{search}")
-async def root_AmazonV2(search: str):
-    products = []  # List to store the name of the product
-    prices = []  # List to store price of the product
-    ratings = []  # List to store rating of the product
-    apps = []  # List to store supported apps
-    os = []  # List to store operating system
-    hd = []  # List to store resolution
-    sound = []
-    links_list = []
+async def _update_cache_and_return_products_flipkart(search_query_cache: str, search: str, isUpdated: bool):
+    try:
+        # links_list = []
+        scrapper = FlipkartOperationalScrapper()
 
-    while len(links_list) == 0:
-        nospaces = search.replace(" ", "+")
-        link = "https://www.amazon.in/s?k=" + nospaces
-        page = requests.get(link)
-        soup = BeautifulSoup(page.content, "lxml")
-        s = soup.findAll('a', {'class': 'a-link-normal s-no-outline'})
-        # Loop for extracting links from Tag Objects
-        for link in s:
-            links_list.append(link.get('href'))
+        products = await scrapper.getFlipkartContentForPage(search)
 
-        print(len(links_list))
+        # products = products_page_1 + products_page_2
 
-    for i1 in links_list:
-        new_webpage = requests.get("https://www.amazon.in" + i1)
-        new_soup = BeautifulSoup(new_webpage.content, "lxml")
-        s1 = new_soup.find('span', class_='a-price-whole')
-        while s1 is None:
-            new_webpage = requests.get("https://www.amazon.in" + i1)
-            new_soup = BeautifulSoup(new_webpage.content, "lxml")
-            s1 = new_soup.find('span', class_='a-price-whole')
-            print(i1, s1)
-        print(s1.text)
-    return links_list
+        # print(len(products))
+        # Store products in Redis cache
+        redis_client.set("flipkart_product_" + search_query_cache, str(products))
+        if isUpdated:
+            print("Updated Cache" + search_query_cache)
+        else:
+            print("Added New Cache" + search_query_cache)
+
+        # Return the product list to the client
+        return products
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
-# a = len(s)
-# print(a)
-# for i in range(a):
-#     # print(s[i])
-#     ab = s[i].get('href')
-#     print(ab)
-# new_webpage = requests.get("https://www.reliancedigital.in" + ab)
-# new_soup = BeautifulSoup(new_webpage.content, "lxml")
-# s1 = new_soup.find('span', class_='pdp__offerPrice')
-# print(s1.text)
+@app.get("/flipkart/v2/{search}", response_model=ProductList)
+async def search_flipkart_products(search: str):
+    try:
+        search_query_cache = search.replace(" ", "")
+        # Check if search query is in Redis cache
+        cached_products = redis_client.get("flipkart_product_" + search_query_cache)
+        if cached_products is not None:
+            # Return cached data to the client
+            print("In Cache")
+            asyncio.create_task(_update_cache_and_return_products_flipkart(search_query_cache, search, True))
+            return {"status": 200, "products": eval(cached_products.decode()), "served_through_cache": True}
 
-# print(products)
-# print(len(ratings))
-# print(prices)
+        # Run the rest of the code in the background
+        products = await _update_cache_and_return_products_flipkart(search_query_cache, search, False)
+
+        # Return the product list to the client
+        return {"status": 200, "products": products, "served_through_cache": False}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/reliance/{search}")
@@ -191,6 +237,7 @@ async def root_Reliance(search: str):
 @app.get("/hello/{name}")
 async def say_hello(name: str):
     return {"message": f"Hello {name}"}
+
 
 @app.get("/")
 async def read_root():

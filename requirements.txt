@@ -63,3 +63,6 @@ watchfiles==0.18.1
 websockets==10.4
 Werkzeug==2.2.2
 zope.interface==5.5.2
+
+redis~=4.5.1
+aioredis~=2.0.1
